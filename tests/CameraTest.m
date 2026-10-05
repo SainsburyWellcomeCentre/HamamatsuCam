@@ -53,6 +53,18 @@ classdef CameraTest < matlab.unittest.TestCase
             testCase.verifyEqual(testCase.Transport.FramesGrabbed, 3);
         end
 
+        function averagingRoundsAsBefore(testCase)
+            % The mean rounds half away from zero, whether the frames sum as integers or not
+            values = [1 2];
+            pick = @(n) values(2 - mod(n, 2));   % alternate 1, 2, 1, ...
+            testCase.Transport.FrameFcn = @(~, roi, n) uint16(pick(n) * ones(roi([4 3])));
+            testCase.Camera.connect();
+            testCase.Camera.AverageFrames = 2;
+            testCase.verifyEqual(unique(testCase.Camera.capture()), uint16(2));   % 1.5
+            testCase.Transport.FrameFcn = @(~, roi, n) pick(n) * ones(roi([4 3]));   % double
+            testCase.verifyEqual(unique(testCase.Camera.capture()), uint16(2));
+        end
+
         function averagingKeepsSixteenBitsWithoutClipping(testCase)
             testCase.Transport.FrameFcn = @(~, roi, ~) uint16(65535 * ones(roi([4 3])));
             testCase.Camera.connect();

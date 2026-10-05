@@ -175,15 +175,25 @@ classdef Camera < handle
             obj.requireReady();
             started = tic;
             try
-                total = double(obj.Transport.grab());
-                for k = 2:obj.AverageValue
-                    total = total + double(obj.Transport.grab());
+                first = obj.Transport.grab();
+                % 16-bit frames sum exactly in uint32 (up to 65537 of them), which is
+                % faster than double; anything else sums in double.
+                if (isa(first, 'uint16') || isa(first, 'uint8')) && obj.AverageValue <= 65537
+                    total = uint32(first);
+                    for k = 2:obj.AverageValue
+                        total = total + uint32(obj.Transport.grab());
+                    end
+                else
+                    total = double(first);
+                    for k = 2:obj.AverageValue
+                        total = total + double(obj.Transport.grab());
+                    end
                 end
             catch err
                 obj.addLog('capture', obj.AverageValue, false, err.message, toc(started));
                 rethrow(err);
             end
-            frame = uint16(total / obj.AverageValue);
+            frame = uint16(double(total) / obj.AverageValue);
             obj.addLog('capture', obj.AverageValue, true, '', toc(started));
         end
 
