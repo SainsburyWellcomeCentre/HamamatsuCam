@@ -24,12 +24,12 @@ a live window) and inside calibration scripts. Its first user is `LuminoseHF`
 | Milestone | State |
 |---|---|
 | M1: `Camera`, transports, simulated camera, tests | **Done** (2026-10-05). Moved out of `LuminoseHF` (`camera/CameraModel.m`) |
-| M2: window (`hamacam.app`) | **Done** on the simulated camera; no human pass yet |
+| M2: window (`hamacam.app`) | **Done** on the simulated camera; laid out like the OBIS laser panel, with the contrast histogram moved from `LuminoseHF`'s camera column, Connect that finds the camera, Details, and `'Parent'`/`'ShowImage'`/`DisplayChanged`/`PixelsFcn` for hosts (2026-10-06); no human pass yet |
 | M3: examples, docs, README | **Done** |
 | M4: `LuminoseHF` uses the package | **Done** (2026-10-05): its eight calibration scripts |
 | M5: rig verification | Pending (`docs/rig-checks.md`) |
 
-The suite has 36 tests, all passing headless on R2025b in about 6 s, and the Code Analyzer reports
+The suite has 79 tests, all passing headless on R2025b in about 60 s, and the Code Analyzer reports
 zero messages.
 
 ## Environment
@@ -68,6 +68,8 @@ If that fails with `Exec format error`, ask the operator to re-register WSL inte
 
 ## Architecture in brief
 
+- `hamacam.gui.CameraApp` is the camera's panel: a window of its own, or inside a client's GUI
+  (`'Parent'`). Clients host it instead of making camera controls.
 - `hamacam.Camera` holds the settings (exposure, averaging, ROI), the state, the log and the
   record.
 - Transports grab single frames and set properties (D2):
@@ -99,12 +101,14 @@ If that fails with `Exec format error`, ask the operator to re-register WSL inte
 
 ## Tests
 
-- The suite has 36 tests:
-  - `CameraTest` (18)
-  - `GuiTest` (8)
+- The suite has 79 tests:
+  - `CameraTest` (22)
+  - `GuiTest` (47, with a made-up camera list: no test asks the real adaptor)
   - `ImaqTransportTest` (3)
   - `ExamplesTest` (2)
   - `HelpTextTest` (5)
+- No test opens a camera or writes outside `tempname` folders: every panel a test makes passes
+  `'SaveCaptures', false` and `'SavePreferences', false`.
 - No test opens a camera. `tests/hardware/checkCamera.m` is run only with permission.
 
 ## Docs rule

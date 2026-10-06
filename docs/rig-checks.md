@@ -33,6 +33,13 @@ offset). Read `exposureS` back after each setting.
 `setRoi([768 768 512 512])`: the frame should be 512 x 512 and show the sensor's centre.
 `resetRoi()` should bring back the full sensor.
 
+### 4b. Binning and subarray (2026-10-06 additions)
+
+`hamacam.listDevices()` and record the formats (do any have `BIN`?). Then `camera.Binning = 2`
+and `4`: the frame should be 1024 x 1024 and 512 x 512 and brighter, the exposure unchanged
+(`exposureS`). In the panel, Size 512 and Draw: check the subarray the camera reports
+(`currentRoi`) matches, and whether a subarray off the 4-pixel grid is refused or moved.
+
 ### 5. A calibration end to end
 
 `LuminoseHF/calibration/calibrate_xy_white.m`, with the DMD.
@@ -43,4 +50,19 @@ Live view rate, contrast, Save, and closing while Live is running.
 
 ## Log
 
-No hardware runs yet.
+### 2026-10-06: formats, binning and subarray (operator approved)
+
+The operator ran `imaqreset` in the MATLAB that held the camera; then, from a fresh MATLAB:
+`hamacam.listDevices`, `connect` (device 1, 10 ms), `rawSource` properties, `binnings()`,
+`Binning` 1, 2, 4, 1 with a `snapshot` each, `setRoi([768 768 512 512])`,
+`setRoi([770 770 510 510])`, `resetRoi`, `disconnect`. No light on the sensor.
+
+- Step 1 (part): identity, formats and the exposure property are in `dcam-imaq.md`; the adaptor
+  was already installed, so nothing was registered.
+- Step 4b: binning works by format with the exposure kept; frames 2048, 1024, 512 square; the
+  dark mean stayed about 99 counts. The off-grid subarray was moved by the camera to the 4-pixel
+  grid. Found afterwards: `setBinning` took the first BIN format, `Std`, whatever the readout
+  mode; it now keeps the mode (not yet run on the camera).
+- Ended Disconnected.
+
+Still open: steps 2, 3, 5, 6, and binning from an `UltraQuiet` format.

@@ -32,6 +32,45 @@ classdef CameraTest < matlab.unittest.TestCase
             testCase.verifyEqual(testCase.Transport.ExposureSValue, 0.002);
         end
 
+        function binningSetBeforeConnectIsAppliedAtConnect(testCase)
+            testCase.Camera.Binning = 2;
+            testCase.verifyEmpty(testCase.Transport.Calls);
+            testCase.Camera.connect();
+            testCase.verifyEqual(testCase.Transport.BinningValue, 2);
+            testCase.verifyEqual(testCase.Camera.Identity.Resolution, [32 24]);
+            testCase.verifyEqual(testCase.Camera.Roi, [0 0 32 24]);
+            testCase.verifySize(testCase.Camera.snapshot(), [24 32]);
+        end
+
+        function binningWhileConnectedResetsTheRoi(testCase)
+            testCase.Camera.connect();
+            testCase.Camera.setRoi([8 4 16 12]);
+            testCase.Camera.Binning = 4;
+            testCase.verifyEqual(testCase.Camera.Roi, [0 0 16 12]);
+            testCase.verifyEqual(testCase.Camera.Identity.Resolution, [16 12]);
+            testCase.verifyEqual(testCase.Camera.binnings(), [1 2 4]);
+            testCase.verifyEqual(testCase.Camera.record().Binning, 4);
+        end
+
+        function binnedPixelsSumTheSignalNotTheOffset(testCase)
+            testCase.Transport.NoiseCounts = 0;
+            testCase.Camera.connect();
+            one = double(testCase.Camera.snapshot());
+            testCase.Camera.Binning = 2;
+            two = double(testCase.Camera.snapshot());
+            testCase.verifyEqual(max(two(:)) - 100, 4 * (max(one(:)) - 100), 'RelTol', 0.05);
+            testCase.verifyEqual(min(two(:)), min(one(:)), 'AbsTol', 2);  % the offset stays
+        end
+
+        function aBinningNotOfferedIsRefused(testCase)
+            testCase.Camera.connect();
+            testCase.verifyError(@() setProperty(testCase.Camera, 'Binning', 3), ...
+                'hamacam:Camera:badValue');
+            testCase.verifyError(@() setProperty(testCase.Camera, 'Binning', 0), ...
+                'hamacam:Camera:badValue');
+            testCase.verifyEqual(testCase.Camera.Binning, 1);
+        end
+
         function exposureIsSentWhenConnected(testCase)
             testCase.Camera.connect();
             testCase.Camera.ExposureMs = 7.5;

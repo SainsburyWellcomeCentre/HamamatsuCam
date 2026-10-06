@@ -13,6 +13,12 @@ classdef ImaqTransport < hamacam.transport.Transport
 %   imaqreset, which registering needs, deletes every Image Acquisition object in the
 %   MATLAB session; it runs only in that first-registration case and prints that it did.
 %
+%   Binning (docs/dcam-imaq.md, to verify on the rig): the adaptor offers it either as
+%   video formats (..._BIN2x2_..., ..._BIN4x4_...), which setBinning switches between by
+%   making the videoinput again with the same exposure, or as a source property whose
+%   name contains Binning. Neither: only 1, and setBinning refuses anything else
+%   ('hamacam:ImaqTransport:noBinning').
+%
 %   Errors with 'hamacam:ImaqTransport:noToolbox', 'hamacam:ImaqTransport:noAdaptor' (not
 %   installed and no DllPath), 'hamacam:ImaqTransport:openFailed', 'hamacam:ImaqTransport:
 %   notOpen' and 'hamacam:ImaqTransport:noExposure' (no exposure property recognised: see
@@ -33,6 +39,7 @@ classdef ImaqTransport < hamacam.transport.Transport
     properties (Access = private)
         Video = []
         ExposureProperty = ''
+        BinningValue = 1
     end
 
     methods
@@ -68,19 +75,12 @@ classdef ImaqTransport < hamacam.transport.Transport
                 fprintf('hamacam: registered %s and reset the Image Acquisition Toolbox.\n', ...
                     obj.DllPath);
             end
-            try
-                video = videoinput(obj.Adaptor, obj.DeviceID);
-                video.FramesPerTrigger = 1;
-                video.TriggerRepeat = Inf;
-                triggerconfig(video, 'manual');
-                start(video);
-            catch err
-                error('hamacam:ImaqTransport:openFailed', ['Could not open %s (%s). Close ' ...
-                    'HCImage or any other program using the camera.'], obj.Description, ...
-                    err.message);
+            obj.makeVideo('');
+            obj.BinningValue = 1;
+            found = formatBinning(obj.Video.VideoFormat);
+            if ~isnan(found)
+                obj.BinningValue = found;
             end
-            obj.Video = video;
-            obj.ExposureProperty = findExposureProperty(getselectedsource(video));
         end
 
         function close(obj)
@@ -139,6 +139,65 @@ classdef ImaqTransport < hamacam.transport.Transport
             roi = obj.Video.ROIPosition;
         end
 
+        function setBinning(obj, n)
+            obj.requireOpen();
+            if n == obj.BinningValue
+                return
+            end
+            format = obj.formatFor(n);
+            if ~isempty(format)
+                % a new videoinput in that format, with the exposure carried over
+                exposure = obj.exposureS();
+                obj.close();
+                obj.makeVideo(format);
+                obj.setExposureS(exposure);
+            else
+                property = obj.binningProperty();
+                if isempty(property)
+                    error('hamacam:ImaqTransport:noBinning', ['The %s adaptor offers no ' ...
+                        'binning (no BIN format, no Binning property): see ' ...
+                        'docs/dcam-imaq.md.'], obj.Adaptor);
+                end
+                stop(obj.Video);
+                source = getselectedsource(obj.Video);
+                values = obj.propertyValues(property);
+                if iscell(values)
+                    match = values(contains(values, sprintf('%dx%d', n, n)) ...
+                        | strcmp(values, sprintf('%d', n)));
+                    source.(property) = match{1};
+                else
+                    source.(property) = n;
+                end
+                obj.Video.ROIPosition = [0 0 obj.Video.VideoResolution];
+                start(obj.Video);
+            end
+            obj.BinningValue = n;
+        end
+
+        function n = binning(obj)
+            obj.requireOpen();
+            n = obj.BinningValue;
+        end
+
+        function list = binnings(obj)
+            obj.requireOpen();
+            list = 1;
+            info = imaqhwinfo(obj.Adaptor, obj.DeviceID);
+            formats = cellstr(info.SupportedFormats);
+            found = cellfun(@formatBinning, formats);
+            list = unique([list, found(~isnan(found))]);
+            if isscalar(list)
+                property = obj.binningProperty();
+                if ~isempty(property)
+                    values = obj.propertyValues(property);
+                    if iscell(values)
+                        values = cellfun(@(v) sscanf(v, '%d', 1), values);
+                    end
+                    list = unique([1, values(:)']);
+                end
+            end
+        end
+
         function source = rawSource(obj)
             obj.requireOpen();
             source = getselectedsource(obj.Video);
@@ -150,6 +209,70 @@ classdef ImaqTransport < hamacam.transport.Transport
     end
 
     methods (Access = private)
+        function makeVideo(obj, format)
+            % A videoinput in format ('' for the adaptor's default), manual trigger, started.
+            try
+                if isempty(format)
+                    video = videoinput(obj.Adaptor, obj.DeviceID);
+                else
+                    video = videoinput(obj.Adaptor, obj.DeviceID, format);
+                end
+                video.FramesPerTrigger = 1;
+                video.TriggerRepeat = Inf;
+                triggerconfig(video, 'manual');
+                start(video);
+            catch err
+                error('hamacam:ImaqTransport:openFailed', ['Could not open %s (%s). Close ' ...
+                    'HCImage or any other program using the camera.'], obj.Description, ...
+                    err.message);
+            end
+            obj.Video = video;
+            obj.ExposureProperty = findExposureProperty(getselectedsource(video));
+        end
+
+        function format = formatFor(obj, n)
+            % The supported format with n x n binning, keeping the current pixel type
+            % (MONO16, ...) and readout mode (the last part: Std, UltraQuiet, ...), or ''
+            % when the adaptor has no such format.
+            info = imaqhwinfo(obj.Adaptor, obj.DeviceID);
+            formats = cellstr(info.SupportedFormats);
+            binned = cellfun(@formatBinning, formats);
+            binned(isnan(binned)) = 1;
+            candidates = formats(binned == n);
+            format = '';
+            if isempty(candidates) || all(isnan(cellfun(@formatBinning, formats)))
+                return
+            end
+            current = obj.Video.VideoFormat;
+            pixelType = strtok(current, '_');
+            same = candidates(startsWith(candidates, pixelType));
+            if ~isempty(same)
+                candidates = same;
+            end
+            parts = strsplit(current, '_');
+            same = candidates(endsWith(candidates, ['_' parts{end}]));
+            if ~isempty(same)
+                candidates = same;
+            end
+            format = candidates{1};
+        end
+
+        function name = binningProperty(obj)
+            % The source property that sets binning, or ''.
+            name = '';
+            names = properties(getselectedsource(obj.Video));
+            match = names(contains(names, 'Binning', 'IgnoreCase', true));
+            if ~isempty(match)
+                name = match{1};
+            end
+        end
+
+        function values = propertyValues(obj, property)
+            % The values a source property takes (a cell of text, or numbers).
+            information = propinfo(getselectedsource(obj.Video), property);
+            values = information.ConstraintValue;
+        end
+
         function requireOpen(obj)
             % Errors unless the camera is open.
             if ~obj.isOpen()
@@ -168,6 +291,16 @@ classdef ImaqTransport < hamacam.transport.Transport
             end
         end
     end
+end
+
+
+function n = formatBinning(format)
+% The binning a format name states (..._BIN2x2_... -> 2), or NaN.
+n = NaN;
+token = regexp(format, 'BIN(\d+)x\1', 'tokens', 'once', 'ignorecase');
+if ~isempty(token)
+    n = str2double(token{1});
+end
 end
 
 

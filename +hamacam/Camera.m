@@ -13,8 +13,9 @@ classdef Camera < handle
 %   Properties (read-only)
 %       State          'Disconnected' | 'Ready'
 %       Transport      the hamacam.transport.Transport in use
-%       Identity       struct: Adaptor, DeviceName, DeviceID, Resolution [w h]
-%       Roi            [x y width height] in use (0-based x and y)
+%       Identity       struct: Adaptor, DeviceName, DeviceID, Resolution [w h] (in binned
+%                      pixels: the full readout at the binning in use)
+%       Roi            [x y width height] in use (0-based x and y, binned pixels)
 %
 %   Properties (settable)
 %       DeviceID       device number in the adaptor (default 1; only while Disconnected)
@@ -22,6 +23,9 @@ classdef Camera < handle
 %                      hamacam.config, i.e. setpref('hamacam', 'DllPath', ...))
 %       ExposureMs     exposure, ms; sent at once when connected (default 10)
 %       AverageFrames  frames averaged by capture() (default 1)
+%       Binning        n x n binning: 1 (none), 2 or 4, as the camera offers (binnings());
+%                      applied at once when connected, else at connect. The ROI becomes
+%                      the full sensor; Resolution and the ROI are in binned pixels
 %       MaxCount       a pixel's full scale (default 65535, 16-bit)
 %       Verbose, LogCapacity
 %
@@ -31,6 +35,7 @@ classdef Camera < handle
 %       frame = capture()       mean of AverageFrames frames, uint16
 %       frame = snapshot()      one frame, uint16
 %       setRoi(roi) / resetRoi()   [x y width height], or the full sensor
+%       list = binnings()       the binnings the camera offers, e.g. [1 2 4]
 %       f = saturatedFraction(frame, level)  fraction of pixels at or above level (default
 %                               0.95) of MaxCount
 %       source = rawSource()    the driver's property object, for settings not wrapped here
@@ -67,6 +72,7 @@ classdef Camera < handle
         DllPath        % adaptor DLL registered if the adaptor is missing
         ExposureMs     % exposure, ms
         AverageFrames  % frames averaged by capture()
+        Binning        % n x n binning
     end
 
     properties
@@ -85,6 +91,7 @@ classdef Camera < handle
         DllValue = ''
         ExposureValue = 10
         AverageValue = 1
+        BinningValue = 1
         OwnsTransport = false
         LogEntries
         ClockStart
@@ -101,8 +108,8 @@ classdef Camera < handle
             end
             cfg = hamacam.config();
             obj.DllValue = cfg.DllPath;
-            names = {'DeviceID', 'DllPath', 'ExposureMs', 'AverageFrames', 'MaxCount', ...
-                'Verbose', 'LogCapacity'};
+            names = {'DeviceID', 'DllPath', 'ExposureMs', 'AverageFrames', 'Binning', ...
+                'MaxCount', 'Verbose', 'LogCapacity'};
             for k = 1:2:numel(varargin)
                 name = char(varargin{k});
                 value = varargin{k + 1};
@@ -144,6 +151,11 @@ classdef Camera < handle
                 obj.Identity = obj.call('deviceInfo', @() obj.Transport.deviceInfo());
                 obj.call('setExposureS', @() obj.Transport.setExposureS( ...
                     obj.ExposureValue / 1000), obj.ExposureValue);
+                if obj.BinningValue ~= obj.call('binning', @() obj.Transport.binning())
+                    obj.call('setBinning', @() obj.Transport.setBinning(obj.BinningValue), ...
+                        obj.BinningValue);
+                    obj.Identity = obj.call('deviceInfo', @() obj.Transport.deviceInfo());
+                end
                 obj.Roi = obj.call('currentRoi', @() obj.Transport.currentRoi());
             catch err
                 obj.Transport.close();
@@ -224,6 +236,12 @@ classdef Camera < handle
             notify(obj, 'SettingsChanged');
         end
 
+        function list = binnings(obj)
+            % list = binnings() is the binnings the camera offers, e.g. [1 2 4].
+            obj.requireReady();
+            list = obj.call('binnings', @() obj.Transport.binnings());
+        end
+
         function fraction = saturatedFraction(obj, frame, level)
             % fraction = saturatedFraction(frame, level) is the share of pixels at or above
             % level (default 0.95) of MaxCount.
@@ -256,6 +274,7 @@ classdef Camera < handle
             s.Identity = obj.Identity;
             s.ExposureMs = obj.ExposureValue;
             s.AverageFrames = obj.AverageValue;
+            s.Binning = obj.BinningValue;
             s.Roi = obj.Roi;
             entries = obj.LogEntries;
             times = obj.ClockEpoch + seconds([entries.Time]);
@@ -305,6 +324,28 @@ classdef Camera < handle
                 obj.call('setExposureS', @() obj.Transport.setExposureS(value / 1000), value);
             end
             obj.ExposureValue = value;
+            notify(obj, 'SettingsChanged');
+        end
+
+        function value = get.Binning(obj)
+            value = obj.BinningValue;
+        end
+
+        function set.Binning(obj, value)
+            if ~isnumeric(value) || ~isscalar(value) || value < 1 || value ~= round(value)
+                error('hamacam:Camera:badValue', 'Binning must be a whole number >= 1.');
+            end
+            if strcmp(obj.State, 'Ready') && value ~= obj.BinningValue
+                offered = obj.call('binnings', @() obj.Transport.binnings());
+                if ~ismember(value, offered)
+                    error('hamacam:Camera:badValue', ['This camera offers binning %s, ' ...
+                        'not %d.'], mat2str(offered), value);
+                end
+                obj.call('setBinning', @() obj.Transport.setBinning(value), value);
+                obj.Identity = obj.call('deviceInfo', @() obj.Transport.deviceInfo());
+                obj.Roi = obj.call('currentRoi', @() obj.Transport.currentRoi());
+            end
+            obj.BinningValue = value;
             notify(obj, 'SettingsChanged');
         end
 

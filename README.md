@@ -19,8 +19,10 @@ testing. It is built for calibration scripts and other closed-loop MATLAB code.
 - **Settings:** exposure in ms, sent at once when connected, and a readout region (ROI) or the
   full sensor. `rawSource()` reaches every other adaptor property.
 - **Saturation check:** `saturatedFraction(frame)` gives the share of pixels near full scale.
-- **A window:** live view, Capture, exposure, averaging, ROI, auto contrast, frame statistics and
-  saving a 16-bit TIFF.
+- **A control panel:** Live and Capture, exposure and averaging, a contrast histogram with
+  draggable limits or Auto, frame statistics and saving a 16-bit TIFF; Connect finds the camera.
+  The connection, ROI and log fold away under Details. It opens as a window of its own or inside
+  another program's window.
 - **A simulated camera:** a spot whose brightness follows the exposure, with noise and clipping.
   You can give it your own frame generator, and tell it to fail or lose its cable.
 - **A session record:** every command, with its time and duration.
@@ -75,8 +77,9 @@ Both run on the simulated camera.
 ## Window
 
 ```matlab
-hamacam.app()          % owns its own camera connection
-hamacam.app(camera)    % shows a camera you already connected (leaves it connected)
+hamacam.app()                        % owns its own camera connection
+hamacam.app(camera)                  % shows a camera you already connected (leaves it connected)
+hamacam.app(camera, 'Parent', tab)   % the same panel inside your own window
 ```
 
 See [docs/gui.md](docs/gui.md).

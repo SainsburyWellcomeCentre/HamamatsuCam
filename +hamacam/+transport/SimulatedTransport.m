@@ -7,11 +7,14 @@ classdef SimulatedTransport < hamacam.transport.Transport
 %
 %   The default frame is a Gaussian spot on a background with noise, whose brightness
 %   grows with the exposure and clips at 65535, so averaging, saturation and exposure
-%   changes can be tested. FrameFcn replaces it: fn(exposureS, roi, frameNumber) returns
-%   uint16 of size roi([4 3]).
+%   changes can be tested. Binning sums the signal of n x n sensor pixels into one, so a
+%   binned frame is smaller and brighter, while the 100-count offset stays 100, as the
+%   rig's ORCA-Flash4.0 showed (docs/dcam-imaq.md). FrameFcn replaces the frame: fn(exposureS,
+%   roi, frameNumber) returns uint16 of size roi([4 3]) (binned pixels).
 %
 %   Properties
-%       Resolution      sensor [width height] (default [512 512])
+%       Resolution      sensor [width height], unbinned (default [512 512])
+%       Binnings        binnings offered (default [1 2 4])
 %       DeviceName      reported name (default 'C11440-36U (simulated)')
 %       FrameFcn        frame generator, or [] for the default
 %       CountsPerMs     spot peak counts per ms of exposure (default 5000)
@@ -19,7 +22,8 @@ classdef SimulatedTransport < hamacam.transport.Transport
 %   Read-only state
 %       Calls           struct array Time (s), Command, Value
 %       ExposureSValue  the exposure set, s
-%       Roi             [x y width height]
+%       Roi             [x y width height], binned pixels
+%       BinningValue    binning in use
 %       FramesGrabbed   frames returned so far
 %
 %   Fault injection: failNext(command, identifier), unplug(), clearCalls(), callsOf(command).
@@ -32,6 +36,7 @@ classdef SimulatedTransport < hamacam.transport.Transport
         FrameFcn = []                          % fn(exposureS, roi, frameNumber)
         CountsPerMs = 5000                     % spot peak counts per ms
         NoiseCounts = 20                       % noise standard deviation
+        Binnings = [1 2 4]                     % binnings offered
     end
 
     properties (SetAccess = protected)
@@ -41,8 +46,9 @@ classdef SimulatedTransport < hamacam.transport.Transport
     properties (SetAccess = private)
         Calls = struct('Time', {}, 'Command', {}, 'Value', {})  % every call
         ExposureSValue = 0.01  % exposure set, s
-        Roi = []               % [x y width height]
+        Roi = []               % [x y width height], binned pixels
         FramesGrabbed = 0      % frames returned
+        BinningValue = 1       % binning in use
     end
 
     properties (Access = private)
@@ -63,7 +69,7 @@ classdef SimulatedTransport < hamacam.transport.Transport
         function open(obj)
             obj.record('open', NaN);
             obj.Opened = true;
-            obj.Roi = [0 0 obj.Resolution];
+            obj.Roi = [0 0 obj.binnedResolution()];
         end
 
         function close(obj)
@@ -77,7 +83,7 @@ classdef SimulatedTransport < hamacam.transport.Transport
         function info = deviceInfo(obj)
             obj.record('deviceInfo', NaN);
             info = struct('Adaptor', 'simulated', 'DeviceName', obj.DeviceName, ...
-                'DeviceID', 1, 'Resolution', obj.Resolution);
+                'DeviceID', 1, 'Resolution', obj.binnedResolution());
         end
 
         function frame = grab(obj)
@@ -102,16 +108,37 @@ classdef SimulatedTransport < hamacam.transport.Transport
 
         function setRoi(obj, roi)
             obj.record('setRoi', NaN);
+            sensor = obj.binnedResolution();
             if isempty(roi)
-                roi = [0 0 obj.Resolution];
+                roi = [0 0 sensor];
             end
-            if roi(1) < 0 || roi(2) < 0 || roi(1) + roi(3) > obj.Resolution(1) ...
-                    || roi(2) + roi(4) > obj.Resolution(2)
+            if roi(1) < 0 || roi(2) < 0 || roi(1) + roi(3) > sensor(1) ...
+                    || roi(2) + roi(4) > sensor(2)
                 error('hamacam:SimulatedTransport:badRoi', ...
-                    'ROI %s does not fit the %dx%d sensor.', mat2str(roi), obj.Resolution(1), ...
-                    obj.Resolution(2));
+                    'ROI %s does not fit the %dx%d sensor.', mat2str(roi), sensor(1), ...
+                    sensor(2));
             end
             obj.Roi = roi;
+        end
+
+        function setBinning(obj, n)
+            obj.record('setBinning', n);
+            if ~ismember(n, obj.Binnings)
+                error('hamacam:SimulatedTransport:badBinning', ...
+                    'Binning %g is not offered (%s).', n, mat2str(obj.Binnings));
+            end
+            obj.BinningValue = n;
+            obj.Roi = [0 0 obj.binnedResolution()];
+        end
+
+        function n = binning(obj)
+            obj.record('binning', NaN);
+            n = obj.BinningValue;
+        end
+
+        function list = binnings(obj)
+            obj.record('binnings', NaN);
+            list = obj.Binnings;
         end
 
         function roi = currentRoi(obj)
@@ -172,14 +199,23 @@ classdef SimulatedTransport < hamacam.transport.Transport
         end
 
         function frame = defaultFrame(obj)
-            % A Gaussian spot at the sensor centre, background 100 counts, with noise.
+            % A Gaussian spot at the sensor centre, offset 100 counts, with noise; binned
+            % pixels sum the signal of n x n sensor pixels (the offset is not summed).
             roi = obj.Roi;
-            [x, y] = meshgrid(roi(1) + (0:roi(3) - 1), roi(2) + (0:roi(4) - 1));
+            n = obj.BinningValue;
+            % centres of the binned pixels, in sensor pixels
+            [x, y] = meshgrid((roi(1) + (0:roi(3) - 1)) * n + (n - 1) / 2, ...
+                (roi(2) + (0:roi(4) - 1)) * n + (n - 1) / 2);
             centre = obj.Resolution / 2;
             sigma = min(obj.Resolution) / 10;
             peak = obj.CountsPerMs * obj.ExposureSValue * 1000;
             spot = peak * exp(-((x - centre(1)).^2 + (y - centre(2)).^2) / (2 * sigma^2));
-            frame = uint16(100 + spot + obj.NoiseCounts * randn(size(spot)));
+            frame = uint16(100 + n^2 * spot + obj.NoiseCounts * randn(size(spot)));
+        end
+
+        function size2 = binnedResolution(obj)
+            % The sensor in binned pixels, [width height].
+            size2 = floor(obj.Resolution / obj.BinningValue);
         end
     end
 end

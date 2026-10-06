@@ -49,10 +49,19 @@ Registering a DLL needs `imaqreset`, which deletes every Image Acquisition objec
 session. The previous code did it on every connect. Now it happens only when the adaptor is not
 yet installed, and it is printed.
 
-### D6. The window is a programmatic uifigure
+### D6. The window is a programmatic uifigure, and a panel other GUIs host
 
 The window is built the same way as the other device packages' windows. Live view is a timer
 calling `snapshot()`. Capture pauses it while averaging, and both go through `Camera`.
+
+Since 2026-10-06 (operator's request) it is laid out like the OBIS laser panel: a header with
+Live and Capture, Connect that finds the camera, the settings and the contrast always shown,
+and the connection, ROI and log folded under Details. With `'Parent'` it is built inside a
+client's GUI, so `LuminoseHF` hosts it rather than making camera controls of its own. The
+contrast histogram with draggable limits moved here from `LuminoseHF`'s
+`gui/DesignerCameraPanel.m`: it is a camera display, not a protocol feature. A client that draws
+frames elsewhere (its DMD canvas) passes `'ShowImage', false`, listens to `DisplayChanged` and
+sets `PixelsFcn` to the pixels it shows.
 
 ## 3. Class overview
 
@@ -70,5 +79,6 @@ calling `snapshot()`. Capture pauses it while averaging, and both go through `Ca
 | Version | Date | What |
 |---|---|---|
 | 0.1.0 | 2026-10-05 | M1–M4: package, simulated camera, window, examples, docs, 36 tests; `LuminoseHF`'s calibration scripts use it. Moved out of `LuminoseHF` (`camera/CameraModel.m`) |
+| 0.2.0 | 2026-10-06 | The panel (D6): laid out like the OBIS laser's, contrast histogram, Connect finds the camera, Details, embeddable (`'Parent'`, `'ShowImage'`, `DisplayChanged`, `PixelsFcn`); red lamp while capturing; Save to a folder; binning (`Camera.Binning`, transports), subarray presets and Draw, Measure (lines and circles, kept, saved as CSV); Save each capture; Capture freezes its frame; 79 tests |
 
 Next is **M5**, rig verification.

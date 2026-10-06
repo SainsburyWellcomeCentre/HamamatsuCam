@@ -16,6 +16,10 @@ classdef (Abstract) Transport < handle
 %       setRoi(roi)               [x y width height] in pixels, 0-based x and y as the
 %                                 Image Acquisition Toolbox uses; [] for the full sensor
 %       roi = currentRoi()
+%       setBinning(n)             n x n binning (1 for none); the ROI becomes the full
+%                                 (binned) sensor and Resolution the binned size
+%       n = binning()
+%       list = binnings()         the binnings the camera offers, e.g. [1 2 4]
 %       source = rawSource()      the driver's own property object for expert use, or []
 %
 %   Description (read-only)  what the transport opens, for records.
@@ -36,6 +40,9 @@ classdef (Abstract) Transport < handle
         s = exposureS(obj)
         setRoi(obj, roi)
         roi = currentRoi(obj)
+        setBinning(obj, n)
+        n = binning(obj)
+        list = binnings(obj)
         source = rawSource(obj)
     end
 end
